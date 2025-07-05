@@ -1,0 +1,29 @@
+# Node modules & build artifacts
+node_modules/
+dist/
+build/
+*.log
+
+# Environment & secrets
+.env
+.env.*
+geyser_auth.json
+config.yaml
+config.*.yaml
+
+# OS / Editor junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Docker
+*.local
+*.pid
+docker-compose.override.yml
+
+# TypeScript compile output
+*.tsbuildinfo
+
+# Other
+coverage/

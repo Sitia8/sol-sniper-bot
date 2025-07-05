@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pump.fun Bot Dashboard</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 1rem; background:#111; color:#eee; }
+    h1 { margin-top: 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { padding: 4px 8px; border-bottom: 1px solid #444; text-align:left; }
+    tr.buy td { background:#003f2d; }
+    tr.sell td { background:#3f0012; }
+  </style>
+</head>
+<body>
+  <h1>Pump.fun Bot Dashboard</h1>
+  <h2>New Pools</h2>
+  <table id="pools">
+    <thead><tr><th>Time</th><th>Mint</th><th>Initial Mcap (SOL)</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Live Prices</h2>
+  <table id="prices">
+    <thead><tr><th>Age</th><th>Time</th><th>Mint</th><th>Price&nbsp;(SOL)</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Global PnL (SOL): <span id="pnl">0</span></h2>
+  <h2>Manual Exit</h2>
+  <input id="mintInput" placeholder="Mint address" style="width:360px"> <button id="sellBtn">Sell</button>
+  <h2>Signals</h2>
+  <table id="signals">
+    <thead><tr><th>Time</th><th>Action</th><th>PnL&nbsp;%</th><th>Reason</th><th>Symbol</th><th>Mint</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const socket = io();
+
+    function fmt(ts){ return new Date(ts*1000).toLocaleTimeString(); }
+
+    socket.on('new_pool', (d) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${fmt(d.time)}</td><td>${d.mint}</td><td>${d.mcap}</td>`;
+      const poolBody = document.querySelector('#pools tbody');
+      poolBody.prepend(tr);
+      // limit to 20 rows
+      const poolRows = Array.from(poolBody.children);
+      if (poolRows.length > 20) {
+        poolRows.slice(20).forEach(r => r.remove());
+      }
+    });
+
+    const priceBody = document.querySelector('#prices tbody');
+    const priceRows = {};
+    const openTrades = {}; // mint -> entry price
+    document.getElementById('sellBtn').addEventListener('click', ()=>{
+      const mint = document.getElementById('mintInput').value.trim();
+      if(mint) socket.emit('manual_sell', {mint});
+    });
+
+    socket.on('price', (d) => {
+      const id = d.mint;
+      let tr = priceRows[id];
+      if (!tr) {
+        tr = document.createElement('tr');
+        priceRows[id] = tr;
+        priceBody.appendChild(tr);
+      }
+      tr.dataset.ts = d.time;
+      const age = 0;
+      tr.innerHTML = `<td>${age}s</td><td>${fmt(d.time)}</td><td>${id}</td><td>${d.price.toFixed(9)}</td>`;
+
+      // sort rows by descending time
+      const rows = Array.from(priceBody.children);
+      rows.sort((a,b) => parseFloat(b.dataset.ts) - parseFloat(a.dataset.ts));
+      rows.forEach(r => priceBody.appendChild(r));
+
+      // cap to 50 rows
+      if (rows.length > 50) {
+        rows.slice(50).forEach(r => {
+          delete priceRows[r.children[2].textContent];
+          r.remove();
+        });
+      }
+
+      // remove rows older than 20 minutes (1200 s)
+      const nowSec = Date.now() / 1000;
+      rows.forEach(r => {
+        const age = nowSec - (parseFloat(r.dataset.ts) || 0);
+        // update age text in first cell
+        const firstCell = r.children[0];
+        if (firstCell) firstCell.textContent = age < 60 ? `${Math.round(age)}s` : `${Math.round(age/60)}m`;
+        if (age > 1200) {
+          delete priceRows[r.children[2].textContent];
+          r.remove();
+        }
+      });
+    });
+
+    socket.on('pnl', (d)=>{
+      document.getElementById('pnl').textContent = d.pnl_pct.toFixed(3);
+    });
+
+    socket.on('signal', (d) => {
+      const tr = document.createElement('tr');
+      tr.className = d.action.toLowerCase();
+
+      let pnlCell = '';
+      if (d.action === 'BUY') {
+        if (d.price) openTrades[d.mint] = d.price;
+      } else if (d.action === 'SELL') {
+        const entry = openTrades[d.mint];
+        const exit = d.price;
+        if (entry && exit) {
+          pnlCell = (((exit - entry) / entry) * 100).toFixed(1) + '%';
+        }
+        delete openTrades[d.mint];
+      }
+
+      tr.innerHTML = `<td>${fmt(d.time)}</td><td>${d.action}</td><td>${pnlCell}</td><td>${d.reason || ''}</td><td>${d.symbol || ''}</td><td>${d.mint}</td>`;
+      document.querySelector('#signals tbody').prepend(tr);
+    });
+  </script>
+</body>
+</html>
